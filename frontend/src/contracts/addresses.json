@@ -1,0 +1,14 @@
+{
+  "localhost": {
+    "BridgeToken": "0xb086f132841D84938400a894adf59a26EFF33EFb",
+    "BridgeSepolia": "0x979862d99A5721C8992a1fc67a862b678c7ce89A"
+  },
+  "sepolia": {
+    "BridgeToken": "0x21639DF680524a5d89d3788ABb710854fB659182",
+    "BridgeSepolia": "0xb413bACa8a4Be7A73aa13702851E0F96E8095988"
+  },
+  "amoy": {
+    "BridgeToken": "0xDBF73040F54e74747a5D3E3743a37017e083EA73",
+    "BridgeAmoy": "0x6364f85f54936a51881f16f48daD2466EffedCEA"
+  }
+}

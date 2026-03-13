@@ -1,0 +1,693 @@
+# 1. Project Overview
+
+### Project Name
+
+**BRT Cross-Chain Bridge**
+
+### Objective
+
+Build a **decentralized cross-chain bridge** that allows users to transfer **BRT tokens** between **EVM-compatible testnets** using a **two-way pegging mechanism**.
+
+Initially support:
+
+* **Ethereum Sepolia**
+* **Polygon Amoy**
+
+### Core Mechanism
+
+Two-way pegging:
+
+**Chain A → Chain B**
+
+```
+Lock Token → Validator verifies → Mint Token
+```
+
+**Chain B → Chain A**
+
+```
+Burn Token → Validator verifies → Unlock Token
+```
+
+The system ensures **1:1 token representation across chains**.
+
+---
+
+# 2. Supported Networks
+
+### Ethereum Sepolia
+
+Chain ID
+
+```
+11155111
+```
+
+Currency
+
+```
+SepoliaETH
+```
+
+---
+
+### Polygon Amoy
+
+Chain ID
+
+```
+80002
+```
+
+Currency
+
+```
+POL
+```
+
+---
+
+# 3. System Actors
+
+## 1. User
+
+A normal wallet user who wants to **bridge BRT tokens between chains**.
+
+Capabilities:
+
+* Connect wallet
+* Approve token
+* Lock tokens
+* Burn tokens
+* Track bridge status
+
+---
+
+## 2. Validator
+
+Validator verifies bridge transactions and executes destination operations.
+
+For now:
+
+```
+Single validator
+```
+
+The **current MetaMask account acts as validator**.
+
+Validator responsibilities:
+
+* Monitor bridge events
+* Validate transactions
+* Execute mint/unlock operations
+
+---
+
+# 4. High-Level Architecture
+
+```
+User Wallet (Metamask)
+        │
+        ▼
+React Frontend (Redux)
+        │
+        ▼
+Bridge Smart Contracts
+        │
+        ▼
+Validator Service
+(Event Listener)
+        │
+        ▼
+Destination Chain Contracts
+```
+
+Components:
+
+1. **Smart Contracts**
+2. **Frontend (React)**
+3. **Validator Dashboard**
+4. **Event Listener System**
+5. **Redux State Manager**
+6. **IPFS (Pinata for metadata if needed)**
+
+---
+
+# 5. Smart Contract Requirements
+
+## Contracts Needed
+
+### 1. BRT Token
+
+ERC20 token.
+
+Features:
+
+```
+ERC20
+Mintable
+Burnable
+```
+
+Functions:
+
+```
+transfer
+approve
+transferFrom
+mint
+burn
+balanceOf
+```
+
+---
+
+### 2. Bridge Contract
+
+Deployed on **each chain**.
+
+Responsibilities:
+
+```
+Lock tokens
+Unlock tokens
+Burn tokens
+Mint tokens
+Emit bridge events
+Track transactions
+```
+
+---
+
+## Required Functions
+
+### Lock Tokens
+
+Used when moving token from **Chain A → Chain B**
+
+```
+lockTokens(amount, destinationChain)
+```
+
+Steps:
+
+1. Transfer tokens to bridge
+2. Lock tokens
+3. Emit event
+
+Event:
+
+```
+TokensLocked
+```
+
+---
+
+### Burn Tokens
+
+Used when moving token from **Chain B → Chain A**
+
+```
+burnTokens(amount, destinationChain)
+```
+
+Steps:
+
+1. Burn tokens
+2. Emit event
+
+Event:
+
+```
+TokensBurned
+```
+
+---
+
+### Mint Tokens
+
+Validator executes mint on destination chain.
+
+```
+mintTokens(user, amount, sourceTx)
+```
+
+Event:
+
+```
+TokensMinted
+```
+
+---
+
+### Unlock Tokens
+
+Validator unlocks tokens.
+
+```
+unlockTokens(user, amount, sourceTx)
+```
+
+Event:
+
+```
+TokensUnlocked
+```
+
+---
+
+# 6. Smart Contract Events
+
+Events are **critical for validator detection**.
+
+### Lock Event
+
+```
+TokensLocked(
+  address user,
+  uint256 amount,
+  uint256 destinationChain,
+  bytes32 txId
+)
+```
+
+---
+
+### Burn Event
+
+```
+TokensBurned(
+  address user,
+  uint256 amount,
+  uint256 destinationChain,
+  bytes32 txId
+)
+```
+
+---
+
+### Mint Event
+
+```
+TokensMinted(
+  address user,
+  uint256 amount,
+  bytes32 sourceTx
+)
+```
+
+---
+
+### Unlock Event
+
+```
+TokensUnlocked(
+  address user,
+  uint256 amount,
+  bytes32 sourceTx
+)
+```
+
+---
+
+# 7. Validator System Requirements
+
+Validator must **listen to blockchain events**.
+
+Event listeners:
+
+```
+TokensLocked
+TokensBurned
+```
+
+When event detected:
+
+Validator adds transaction to **Pending Queue**.
+
+---
+
+### Validator Operations
+
+Validator dashboard shows:
+
+```
+Pending transactions
+Validated transactions
+Completed transactions
+```
+
+Validator actions:
+
+```
+Validate Transaction
+Execute Mint
+Execute Unlock
+```
+
+---
+
+# 8. Frontend Requirements
+
+Framework:
+
+```
+React
+Redux
+Ethers.js
+```
+
+---
+
+# 9. Frontend Pages
+
+## 1. Wallet Connection Screen
+
+User connects MetaMask.
+
+Display:
+
+```
+Wallet Address
+Connected Network
+```
+
+---
+
+## 2. Bridge Dashboard
+
+User initiates transfer.
+
+Fields:
+
+```
+Source Chain
+Destination Chain
+Amount
+```
+
+(No token address field)
+
+Token is always:
+
+```
+BRT
+```
+
+---
+
+Buttons:
+
+```
+Approve Token
+Bridge Token
+```
+
+---
+
+# 10. Token Approval Requirement
+
+Before bridging:
+
+User must approve bridge contract.
+
+```
+approve(bridgeAddress, amount)
+```
+
+If approval missing:
+
+UI must prompt:
+
+```
+Approve BRT Token
+```
+
+---
+
+# 11. User Flow
+
+### Step 1
+
+Connect wallet.
+
+---
+
+### Step 2
+
+Select:
+
+```
+Source Chain
+Destination Chain
+Amount
+```
+
+---
+
+### Step 3
+
+Approve token.
+
+```
+approve(bridge)
+```
+
+---
+
+### Step 4
+
+Initiate transfer.
+
+```
+lockTokens()
+or
+burnTokens()
+```
+
+---
+
+### Step 5
+
+Validator sees transaction.
+
+---
+
+### Step 6
+
+Validator validates.
+
+---
+
+### Step 7
+
+Destination chain executes:
+
+```
+mint
+or
+unlock
+```
+
+---
+
+### Step 8
+
+User balance updates.
+
+---
+
+# 12. Validator Dashboard Requirements
+
+Separate page.
+
+```
+/validator
+```
+
+Sections:
+
+---
+
+## Pending Transactions
+
+Show:
+
+```
+User Address
+Amount
+Source Chain
+Destination Chain
+Tx Hash
+Timestamp
+Status
+```
+
+Action:
+
+```
+Validate
+```
+
+---
+
+## Validated Transactions
+
+Show approved but not executed.
+
+---
+
+## Completed Transactions
+
+Show completed bridges.
+
+---
+
+# 13. Real-Time Updates
+
+Use:
+
+```
+Redux
+ethers.js event listeners
+```
+
+Events automatically update:
+
+```
+User dashboard
+Validator dashboard
+```
+
+---
+
+# 14. Redux State
+
+Global state stores:
+
+```
+transactions
+pendingTransfers
+validatedTransfers
+completedTransfers
+walletInfo
+tokenBalance
+```
+
+---
+
+# 15. Deployment Strategy
+
+Contracts deployed to:
+
+```
+Sepolia
+Amoy
+```
+
+Deployment scripts must:
+
+```
+Deploy contracts
+Save addresses
+Export ABI
+Update frontend config
+```
+
+Files updated automatically:
+
+```
+.env
+frontend/config/contracts.json
+frontend/abi/
+```
+
+---
+
+# 16. Environment Variables
+
+Example:
+
+```
+SEPOLIA_RPC
+AMOY_RPC
+
+PRIVATE_KEY
+
+SEPOLIA_BRT
+AMOY_BRT
+
+SEPOLIA_BRIDGE
+AMOY_BRIDGE
+```
+
+---
+
+# 17. Security Requirements
+
+Prevent:
+
+```
+double mint
+double unlock
+replay attacks
+```
+
+Use:
+
+```
+processedTransactions mapping
+```
+
+---
+
+# 18. Testing Requirements
+
+Tests must cover:
+
+```
+token approval
+lock tokens
+burn tokens
+mint tokens
+unlock tokens
+validator validation
+```
+
+---
+
+# 19. Testing Flow
+
+Test:
+
+```
+Sepolia → Amoy
+Amoy → Sepolia
+```
+
+Steps:
+
+```
+lock token
+validator validate
+mint token
+check balance
+```
+
+---
+
+# 20. Expected Final Features
+
+Application must support:
+
+```
+Cross-chain BRT token transfer
+Validator verification
+Real-time dashboard
+Automatic event listening
+Two-way pegging
+Approval enforcement
+Transaction history
+```
+
+---
