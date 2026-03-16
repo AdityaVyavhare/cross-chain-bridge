@@ -2,15 +2,20 @@ import { createSlice } from "@reduxjs/toolkit";
 
 /**
  * Transaction statuses:
- *  - pending:    User initiated the bridge tx on source chain
+ *  - pending:    User initiated bridge tx on source chain
  *  - validated:  Validator signed / approved
  *  - completed:  Destination chain tx confirmed
  *  - failed:     Error during relay
+ *
+ * Transaction types:
+ *  - "BRT Lock -> Mint"     (Sepolia -> Amoy token)
+ *  - "BRT Burn -> Unlock"   (Amoy -> Sepolia token)
+ *  - "NFT Lock -> Mirror"   (Sepolia -> Amoy NFT)
+ *  - "NFT Burn -> Unlock"   (Amoy -> Sepolia NFT)
  */
 
 const STORAGE_KEY = "bridge_transactions";
 
-// Load persisted transactions from localStorage
 function loadPersistedTransactions() {
   try {
     const data = localStorage.getItem(STORAGE_KEY);
@@ -24,7 +29,6 @@ function loadPersistedTransactions() {
   return [];
 }
 
-// Save transactions to localStorage
 function persistTransactions(items) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
@@ -34,7 +38,6 @@ function persistTransactions(items) {
 }
 
 const initialState = {
-  // All bridge transactions keyed by a unique id
   items: loadPersistedTransactions(),
 };
 
@@ -42,20 +45,15 @@ const bridgeSlice = createSlice({
   name: "bridge",
   initialState,
   reducers: {
-    // Add a new bridge transaction (from user action or event listener)
     addTransaction(state, action) {
       const tx = action.payload;
-      // Avoid duplicates (by nonce + sourceChain combo)
-      const exists = state.items.find(
-        (t) => t.nonce === tx.nonce && t.sourceChain === tx.sourceChain,
-      );
+      const exists = state.items.find((t) => t.id === tx.id);
       if (!exists) {
         state.items.unshift(tx);
         persistTransactions(state.items);
       }
     },
 
-    // Update status of an existing transaction
     updateTransactionStatus(state, action) {
       const { id, status, destTxHash } = action.payload;
       const tx = state.items.find((t) => t.id === id);
@@ -68,13 +66,11 @@ const bridgeSlice = createSlice({
       }
     },
 
-    // Bulk load transactions (e.g. from initial event scan)
     setTransactions(state, action) {
       state.items = action.payload;
       persistTransactions(state.items);
     },
 
-    // Clear all
     clearTransactions(state) {
       state.items = [];
       persistTransactions(state.items);
@@ -97,5 +93,11 @@ export const selectValidatedTransactions = (state) =>
   state.bridge.items.filter((t) => t.status === "validated");
 export const selectCompletedTransactions = (state) =>
   state.bridge.items.filter((t) => t.status === "completed");
+
+// Filter by type
+export const selectTokenTransactions = (state) =>
+  state.bridge.items.filter((t) => t.type.includes("BRT"));
+export const selectNFTTransactions = (state) =>
+  state.bridge.items.filter((t) => t.type.includes("NFT"));
 
 export default bridgeSlice.reducer;

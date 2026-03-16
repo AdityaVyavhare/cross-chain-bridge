@@ -17,11 +17,6 @@ module.exports = {
     hardhat: {
       chainId: 31337,
     },
-    localhost: {
-      url: "http://127.0.0.1:8545",
-      accounts: [PRIVATE_KEY],
-      chainId: 31337,
-    },
     sepolia: {
       url: process.env.SEPOLIA_RPC || "https://rpc.sepolia.org",
       accounts: [PRIVATE_KEY],

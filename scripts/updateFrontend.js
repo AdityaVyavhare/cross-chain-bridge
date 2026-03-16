@@ -5,7 +5,7 @@
  *   npx hardhat run scripts/updateFrontend.js
  *
  * What it does:
- *   1. Reads compiled artifacts for BridgeToken, BridgeSepolia, BridgeAmoy
+ *   1. Reads compiled artifacts for all healthcare bridge contracts
  *   2. Extracts the ABI from each and writes to frontend/src/contracts/abis/
  *   3. Merges new addresses into frontend/src/contracts/addresses.json (per network)
  */
@@ -20,7 +20,13 @@ const ADDRESSES_FILE = path.resolve(FRONTEND_CONTRACTS, "addresses.json");
 const ARTIFACTS_DIR = path.resolve(__dirname, "../artifacts/contracts");
 
 // Contracts we care about
-const CONTRACTS = ["BridgeToken", "BridgeSepolia", "BridgeAmoy"];
+const CONTRACTS = [
+  "BRTToken",
+  "MedicalRecordNFT",
+  "ConsentManager",
+  "ValidatorManager",
+  "HealthcareBridge",
+];
 
 // ── Helpers ────────────────────────────────────────────────
 function ensureDir(dir) {

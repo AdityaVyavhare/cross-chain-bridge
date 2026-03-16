@@ -1,16 +1,11 @@
 {
   "name": "cross-chain-bridge",
   "version": "1.0.0",
-  "description": "Minimal bi-directional cross-chain token bridge (Sepolia <-> Amoy)",
+  "description": "Cross-chain Healthcare Medical NFT Bridge with BRT utility token (Sepolia <-> Amoy)",
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
-    "deploy:token:sepolia": "hardhat run scripts/deployToken.js --network sepolia",
-    "deploy:bridge:sepolia": "hardhat run scripts/deploySepoliaBridge.js --network sepolia",
-    "deploy:token:amoy": "hardhat run scripts/deployToken.js --network amoy",
-    "deploy:bridge:amoy": "hardhat run scripts/deployAmoyBridge.js --network amoy",
-    "setup:sepolia": "hardhat run scripts/setup.js --network sepolia",
-    "setup:amoy": "hardhat run scripts/setup.js --network amoy",
+    "deploy": "hardhat run scripts/deployAll.js",
     "validator": "node validator/validator.js"
   },
   "dependencies": {

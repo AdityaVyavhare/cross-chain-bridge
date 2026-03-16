@@ -1,4 +1,3 @@
-// Network configuration + deployed addresses (auto-populated by deploy scripts)
 import { addresses } from "./contracts";
 
 const config = {
@@ -8,14 +7,17 @@ const config = {
     name: "Sepolia",
     networkKey: "sepolia",
     rpc: process.env.REACT_APP_SEPOLIA_RPC || "https://rpc.sepolia.org",
-    token:
-      addresses.sepolia?.BridgeToken ||
-      process.env.REACT_APP_SEPOLIA_TOKEN ||
-      "",
+    brtToken:
+      addresses.sepolia?.BRTToken || process.env.REACT_APP_SEPOLIA_BRT || "",
+    medicalNFT: addresses.sepolia?.MedicalRecordNFT || "",
     bridge:
-      addresses.sepolia?.BridgeSepolia ||
+      addresses.sepolia?.HealthcareBridge ||
       process.env.REACT_APP_SEPOLIA_BRIDGE ||
       "",
+    consentManager: addresses.sepolia?.ConsentManager || "",
+    validatorManager: addresses.sepolia?.ValidatorManager || "",
+    token:
+      addresses.sepolia?.BRTToken || process.env.REACT_APP_SEPOLIA_TOKEN || "",
     explorer: "https://sepolia.etherscan.io",
   },
   amoy: {
@@ -25,21 +27,16 @@ const config = {
     networkKey: "amoy",
     rpc:
       process.env.REACT_APP_AMOY_RPC || "https://rpc-amoy.polygon.technology",
-    token:
-      addresses.amoy?.BridgeToken || process.env.REACT_APP_AMOY_TOKEN || "",
+    brtToken: addresses.amoy?.BRTToken || process.env.REACT_APP_AMOY_BRT || "",
+    medicalNFT: addresses.amoy?.MedicalRecordNFT || "",
     bridge:
-      addresses.amoy?.BridgeAmoy || process.env.REACT_APP_AMOY_BRIDGE || "",
+      addresses.amoy?.HealthcareBridge ||
+      process.env.REACT_APP_AMOY_BRIDGE ||
+      "",
+    consentManager: addresses.amoy?.ConsentManager || "",
+    validatorManager: addresses.amoy?.ValidatorManager || "",
+    token: addresses.amoy?.BRTToken || process.env.REACT_APP_AMOY_TOKEN || "",
     explorer: "https://amoy.polygonscan.com",
-  },
-  localhost: {
-    chainId: 31337,
-    chainIdHex: "0x7a69",
-    name: "Localhost",
-    networkKey: "localhost",
-    rpc: "http://127.0.0.1:8545",
-    token: addresses.localhost?.BridgeToken || "",
-    bridge: addresses.localhost?.BridgeSepolia || "",
-    explorer: "",
   },
   pinata: {
     apiKey: process.env.REACT_APP_PINATA_API_KEY || "",
@@ -47,14 +44,5 @@ const config = {
     gateway: "https://gateway.pinata.cloud/ipfs/",
   },
 };
-
-// Warn at startup if no addresses found anywhere
-if (!config.sepolia.token && !config.amoy.token && !config.localhost.token) {
-  console.warn(
-    "[Bridge Config] No contract addresses found!\n" +
-      "Run: npx hardhat run scripts/deployAllChains.js --network <network>\n" +
-      "This auto-generates frontend/src/contracts/addresses.json",
-  );
-}
 
 export default config;

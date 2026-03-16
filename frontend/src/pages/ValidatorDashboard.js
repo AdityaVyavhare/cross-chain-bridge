@@ -2,329 +2,297 @@ import React, { useState, useCallback } from "react";
 import { ethers } from "ethers";
 import { useSelector, useDispatch } from "react-redux";
 import { useBridge } from "../context/BridgeContext";
-import WalletConnect from "../components/WalletConnect";
-import NetworkSwitch from "../components/NetworkSwitch";
 import config from "../config";
-import { BridgeSepoliaAbi, BridgeAmoyAbi } from "../contracts";
-import { shortenAddress } from "../utils/contracts";
+import { HealthcareBridgeAbi } from "../contracts";
+import { shortenAddress, getGasOverrides } from "../utils/contracts";
 import {
   selectPendingTransactions,
   selectValidatedTransactions,
   selectCompletedTransactions,
+  selectAllTransactions,
   updateTransactionStatus,
 } from "../slices/bridgeSlice";
 
 const SEPOLIA_CHAIN_ID = config.sepolia.chainId;
 const AMOY_CHAIN_ID = config.amoy.chainId;
 
-// Fetch gas price from direct RPC (not MetaMask) and force legacy tx.
-// Amoy's EIP-1559 estimates are broken (1.5 gwei vs 66 gwei needed).
-async function getGasOverrides(destChainId) {
-  try {
-    const rpcUrl = destChainId === AMOY_CHAIN_ID
-      ? config.amoy.rpc
-      : config.sepolia.rpc;
-    const directProvider = new ethers.providers.JsonRpcProvider(rpcUrl);
-    const gasPrice = await directProvider.getGasPrice();
-    return { gasPrice: gasPrice.mul(120).div(100), type: 0 };
-  } catch {
-    return {};
-  }
+const BRIDGE_ABI_FALLBACK = [
+  "function mintTokens(address,uint256,uint256,uint256,bytes)",
+  "function unlockTokens(address,uint256,uint256,uint256,bytes)",
+  "function mintMirrorNFT(address,uint256,uint256,uint256,string,string,address,uint256,bytes)",
+  "function unlockNFT(address,uint256,uint256,uint256,bytes)",
+  "function tokenProcessed(uint256) view returns (bool)",
+  "function nftProcessed(uint256) view returns (bool)",
+];
+
+function getBridgeAbi() {
+  return HealthcareBridgeAbi && HealthcareBridgeAbi.length > 0 ? HealthcareBridgeAbi : BRIDGE_ABI_FALLBACK;
 }
 
-export default function ValidatorDashboard() {
-  const { account, signer, chainId, switchNetwork } = useBridge();
+export default function ValidatorDashboard({ subPage }) {
+  const { account, signer, chainId, switchNetwork, networkConfig } = useBridge();
   const dispatch = useDispatch();
 
   const pending = useSelector(selectPendingTransactions);
   const validated = useSelector(selectValidatedTransactions);
   const completed = useSelector(selectCompletedTransactions);
+  const allTx = useSelector(selectAllTransactions);
 
   const [busyId, setBusyId] = useState(null);
+  const chainName = networkConfig ? networkConfig.name : chainId === SEPOLIA_CHAIN_ID ? "Sepolia" : chainId === AMOY_CHAIN_ID ? "Amoy" : `Chain ${chainId}`;
 
-  // ── Validate & Relay a single transfer ─────────────────
-  const handleValidateAndRelay = useCallback(
-    async (transfer) => {
-      if (!signer || !account) {
-        alert("Connect wallet first");
+  const handleValidateAndRelay = useCallback(async (transfer) => {
+    if (!signer || !account) { alert("Connect wallet first"); return; }
+    setBusyId(transfer.id);
+    try {
+      const isFromSepolia = transfer.sourceChainId === SEPOLIA_CHAIN_ID;
+      const destChainId = isFromSepolia ? AMOY_CHAIN_ID : SEPOLIA_CHAIN_ID;
+      const destRpc = isFromSepolia ? config.amoy.rpc : config.sepolia.rpc;
+      const destAddr = isFromSepolia ? config.amoy.bridge : config.sepolia.bridge;
+
+      const checkProvider = new ethers.providers.JsonRpcProvider(destRpc);
+      const checkContract = new ethers.Contract(destAddr,
+        ["function tokenProcessed(uint256) view returns(bool)", "function nftProcessed(uint256) view returns(bool)"],
+        checkProvider);
+
+      const isNFT = transfer.type.includes("NFT");
+      const processed = isNFT ? await checkContract.nftProcessed(transfer.nonce) : await checkContract.tokenProcessed(transfer.nonce);
+
+      if (processed) {
+        dispatch(updateTransactionStatus({ id: transfer.id, status: "completed" }));
+        alert("Already processed on destination chain.");
+        setBusyId(null);
         return;
       }
 
-      setBusyId(transfer.id);
-
-      try {
-        // 0) Pre-flight: check if this nonce was already processed
-        const isFromSepolia = transfer.sourceChainId === SEPOLIA_CHAIN_ID;
-        const destChainId = isFromSepolia ? AMOY_CHAIN_ID : SEPOLIA_CHAIN_ID;
-        const destRpc = isFromSepolia ? config.amoy.rpc : config.sepolia.rpc;
-        const checkProvider = new ethers.providers.JsonRpcProvider(destRpc);
-        const checkAbi = ["function processed(uint256) view returns(bool)", "function validator() view returns(address)"];
-        const destAddr = isFromSepolia ? config.amoy.bridge : config.sepolia.bridge;
-        const checkContract = new ethers.Contract(destAddr, checkAbi, checkProvider);
-
-        const alreadyProcessed = await checkContract.processed(transfer.nonce);
-        if (alreadyProcessed) {
-          dispatch(updateTransactionStatus({ id: transfer.id, status: "completed" }));
-          alert("This nonce is already processed on the destination chain.");
-          setBusyId(null);
-          return;
-        }
-
-        const contractValidator = await checkContract.validator();
-        if (account.toLowerCase() !== contractValidator.toLowerCase()) {
-          alert(`Wrong wallet! Contract validator is ${contractValidator}. Switch MetaMask to that account.`);
-          setBusyId(null);
-          return;
-        }
-
-        // 1) Build message hash
-        const messageHash = ethers.utils.solidityKeccak256(
-          ["address", "uint256", "uint256", "uint256"],
-          [
-            transfer.sender,
-            transfer.amount,
-            transfer.nonce,
-            transfer.sourceChainId,
-          ],
-        );
-
-        // 2) Sign with MetaMask
-        const messageBytes = ethers.utils.arrayify(messageHash);
-        const signature = await signer.signMessage(messageBytes);
-
-        // Mark as validated
-        dispatch(
-          updateTransactionStatus({
-            id: transfer.id,
-            status: "validated",
-          }),
-        );
-
-        // 3) Switch to destination chain if needed
-
-        if (chainId !== destChainId) {
-          const targetHex = isFromSepolia
-            ? config.amoy.chainIdHex
-            : config.sepolia.chainIdHex;
-          await switchNetwork(targetHex);
-          await new Promise((r) => setTimeout(r, 1500));
-        }
-
-        // 4) Get fresh signer for destination chain
-        const destProvider = new ethers.providers.Web3Provider(window.ethereum);
-        const destSigner = destProvider.getSigner();
-
-        // 5) Execute destination chain operation
-        const gasOverrides = await getGasOverrides(destChainId);
-        let tx;
-        if (isFromSepolia) {
-          // Lock on Sepolia → Mint on Amoy
-          const amoyBridge = new ethers.Contract(
-            config.amoy.bridge,
-            BridgeAmoyAbi,
-            destSigner,
-          );
-          tx = await amoyBridge.mint(
-            transfer.sender,
-            transfer.amount,
-            transfer.nonce,
-            transfer.sourceChainId,
-            signature,
-            gasOverrides,
-          );
-        } else {
-          // Burn on Amoy → Unlock on Sepolia
-          const sepoliaBridge = new ethers.Contract(
-            config.sepolia.bridge,
-            BridgeSepoliaAbi,
-            destSigner,
-          );
-          tx = await sepoliaBridge.unlock(
-            transfer.sender,
-            transfer.amount,
-            transfer.nonce,
-            transfer.sourceChainId,
-            signature,
-            gasOverrides,
-          );
-        }
-
-        await tx.wait();
-
-        // Mark completed
-        dispatch(
-          updateTransactionStatus({
-            id: transfer.id,
-            status: "completed",
-            destTxHash: tx.hash,
-          }),
-        );
-      } catch (err) {
-        console.error("Validation error:", err);
-        // Revert to pending on failure
-        dispatch(
-          updateTransactionStatus({
-            id: transfer.id,
-            status: "pending",
-          }),
-        );
-        alert("Validation failed: " + (err.reason || err.message));
-      } finally {
-        setBusyId(null);
+      let messageHash;
+      if (isNFT) {
+        messageHash = ethers.utils.solidityKeccak256(
+          ["string", "address", "uint256", "uint256", "uint256"],
+          ["NFT", transfer.sender, transfer.tokenId, transfer.nonce, transfer.sourceChainId]);
+      } else {
+        messageHash = ethers.utils.solidityKeccak256(
+          ["string", "address", "uint256", "uint256", "uint256"],
+          ["TOKEN", transfer.sender, transfer.amount, transfer.nonce, transfer.sourceChainId]);
       }
-    },
-    [signer, account, chainId, switchNetwork, dispatch],
-  );
 
-  return (
-    <div>
-      <h2>Validator Dashboard</h2>
-      <WalletConnect />
+      const signature = await signer.signMessage(ethers.utils.arrayify(messageHash));
+      dispatch(updateTransactionStatus({ id: transfer.id, status: "validated" }));
 
-      {account && (
-        <>
-          <NetworkSwitch />
+      if (chainId !== destChainId) {
+        const targetHex = isFromSepolia ? config.amoy.chainIdHex : config.sepolia.chainIdHex;
+        await switchNetwork(targetHex);
+        await new Promise((r) => setTimeout(r, 1500));
+      }
 
-          {/* Validator Info */}
-          <div className="card">
-            <div className="info-row">
-              <span>Validator Address:</span>
-              <span>{shortenAddress(account)}</span>
-            </div>
-            <div className="info-row">
-              <span>Connected Chain:</span>
-              <span className="highlight">
-                {chainId === SEPOLIA_CHAIN_ID
-                  ? "Sepolia"
-                  : chainId === AMOY_CHAIN_ID
-                  ? "Amoy"
-                  : `Chain ${chainId}`}
-              </span>
-            </div>
-          </div>
+      const destProvider = new ethers.providers.Web3Provider(window.ethereum);
+      const destSigner = destProvider.getSigner();
+      const gasOverrides = await getGasOverrides(destChainId);
+      const destBridge = new ethers.Contract(destAddr, getBridgeAbi(), destSigner);
 
-          {/* Stats */}
-          <div className="stats-grid">
-            <div className="stat-card">
-              <div className="stat-value pending-text">{pending.length}</div>
-              <div className="stat-label">Pending</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-value validated-text">
-                {validated.length}
-              </div>
-              <div className="stat-label">Validated</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-value completed-text">
-                {completed.length}
-              </div>
-              <div className="stat-label">Completed</div>
-            </div>
-          </div>
+      let tx;
+      if (isNFT && isFromSepolia) {
+        tx = await destBridge.mintMirrorNFT(transfer.sender, transfer.tokenId, transfer.nonce, transfer.sourceChainId,
+          transfer.recordType || "", transfer.encryptedCID || "", transfer.hospital || ethers.constants.AddressZero,
+          transfer.originalChainId || transfer.sourceChainId, signature, gasOverrides);
+      } else if (isNFT && !isFromSepolia) {
+        tx = await destBridge.unlockNFT(transfer.sender, transfer.tokenId, transfer.nonce, transfer.sourceChainId, signature, gasOverrides);
+      } else if (!isNFT && isFromSepolia) {
+        tx = await destBridge.mintTokens(transfer.sender, transfer.amount, transfer.nonce, transfer.sourceChainId, signature, gasOverrides);
+      } else {
+        tx = await destBridge.unlockTokens(transfer.sender, transfer.amount, transfer.nonce, transfer.sourceChainId, signature, gasOverrides);
+      }
 
-          {/* ── Pending Transactions ──────────────────────── */}
-          <h3 className="section-title">
-            Pending Transactions ({pending.length})
-          </h3>
-          {pending.length === 0 ? (
-            <div className="card muted">No pending transactions.</div>
-          ) : (
-            pending.map((tx) => (
-              <TransactionCard
-                key={tx.id}
-                tx={tx}
-                onValidate={handleValidateAndRelay}
-                busy={busyId === tx.id}
-                showAction
-              />
-            ))
-          )}
+      await tx.wait();
+      dispatch(updateTransactionStatus({ id: transfer.id, status: "completed", destTxHash: tx.hash }));
+    } catch (err) {
+      console.error("Validation error:", err);
+      dispatch(updateTransactionStatus({ id: transfer.id, status: "pending" }));
+      alert("Validation failed: " + (err.reason || err.message));
+    } finally { setBusyId(null); }
+  }, [signer, account, chainId, switchNetwork, dispatch]);
 
-          {/* ── Validated Transactions ────────────────────── */}
-          <h3 className="section-title">
-            Validated Transactions ({validated.length})
-          </h3>
-          {validated.length === 0 ? (
-            <div className="card muted">No validated transactions.</div>
-          ) : (
-            validated.map((tx) => (
-              <TransactionCard key={tx.id} tx={tx} busy={busyId === tx.id} />
-            ))
-          )}
-
-          {/* ── Completed Transactions ────────────────────── */}
-          <h3 className="section-title">
-            Completed Transactions ({completed.length})
-          </h3>
-          {completed.length === 0 ? (
-            <div className="card muted">No completed transactions.</div>
-          ) : (
-            completed.map((tx) => <TransactionCard key={tx.id} tx={tx} />)
-          )}
-        </>
-      )}
+  const topBar = (title, subtitle) => (
+    <div className="topbar">
+      <div className="topbar-left"><h1>{title}</h1><p>{subtitle}</p></div>
+      <div className="topbar-right">
+        <span className="topbar-chip">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0d9488" strokeWidth="2"><circle cx="12" cy="12" r="10"/></svg>
+          Mainnet / Testnets
+        </span>
+      </div>
     </div>
   );
-}
 
-// ── Transaction Card ───────────────────────────────────────
-function TransactionCard({ tx, onValidate, busy, showAction }) {
-  return (
-    <div className="validator-card">
-      <div className="validator-card-header">
-        <span className="validator-type">{tx.type}</span>
-        <span className={`badge badge-${tx.status}`}>{tx.status}</span>
-      </div>
-
-      <div className="info-row">
-        <span>Sender:</span>
-        <span>{shortenAddress(tx.sender)}</span>
-      </div>
-      <div className="info-row">
-        <span>Amount:</span>
-        <span>{tx.amountFormatted} BRT</span>
-      </div>
-      <div className="info-row">
-        <span>Route:</span>
-        <span>
-          {tx.sourceChain} → {tx.destChain}
-        </span>
-      </div>
-      <div className="info-row">
-        <span>Nonce:</span>
-        <span>{tx.nonce}</span>
-      </div>
-      <div className="info-row">
-        <span>Time:</span>
-        <span>{new Date(tx.timestamp).toLocaleString()}</span>
-      </div>
-
-      <div style={{ marginTop: 4 }}>
-        <span style={{ color: "#888", fontSize: 12 }}>Source Tx: </span>
-        <span className="hash" style={{ fontSize: 12 }}>
-          {tx.txHash}
-        </span>
-      </div>
-      {tx.destTxHash && (
-        <div style={{ marginTop: 2 }}>
-          <span style={{ color: "#888", fontSize: 12 }}>Dest Tx: </span>
-          <span className="hash" style={{ fontSize: 12 }}>
-            {tx.destTxHash}
-          </span>
+  // ═══════════ Pending Queue ═══════════════════
+  if (subPage === "dashboard") {
+    return (
+      <div>
+        {topBar("Validator Dashboard", "Monitor bridge events and validate cross-chain transactions.")}
+        <div className="stats-row stats-row-3">
+          <div className="stat-card">
+            <div className="stat-card-header"><span>Pending Transactions</span><span className="stat-icon">&#9201;</span></div>
+            <div className="stat-value">{pending.length}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-header"><span>Validated Today</span><span className="stat-icon">&#9989;</span></div>
+            <div className="stat-value">{validated.length + completed.length}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-header"><span>Total Gas Spent</span><span className="stat-icon">&#9981;</span></div>
+            <div className="stat-value">--</div>
+          </div>
         </div>
-      )}
 
-      {showAction && onValidate && (
-        <button
-          className="btn-success"
-          style={{ marginTop: 10, width: "100%" }}
-          onClick={() => onValidate(tx)}
-          disabled={busy}
-        >
-          {busy ? "Processing..." : "Validate & Relay"}
-        </button>
-      )}
-    </div>
-  );
+        <div className="card">
+          <div className="card-header">
+            <h2>Action Required: Pending Validations</h2>
+            <button className="btn btn-sm btn-outline">Refresh Events</button>
+          </div>
+
+          {pending.length === 0 ? (
+            <div className="empty-state"><p>No pending transactions to validate.</p></div>
+          ) : (
+            <table className="validator-table">
+              <thead>
+                <tr><th>Tx ID</th><th>Type</th><th>Route</th><th>User Address</th><th>Payload (ID/Amt)</th><th>Status</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+                {pending.map((tx) => {
+                  const isNFT = tx.type.includes("NFT");
+                  return (
+                    <tr key={tx.id}>
+                      <td><span className="cell-hash">{tx.txHash ? shortenAddress(tx.txHash) : "--"}</span></td>
+                      <td><span className={isNFT ? "badge badge-nft" : "badge badge-token"}>{isNFT ? "Medical NFT" : "Token"}</span></td>
+                      <td>
+                        <span className="route-text">
+                          {tx.sourceChain} &rarr; {tx.destChain}
+                        </span>
+                      </td>
+                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>{shortenAddress(tx.sender)}</td>
+                      <td>{isNFT ? `#${tx.tokenId || "?"}` : `${tx.amountFormatted || "?"} BRT`}</td>
+                      <td><span className={`badge badge-${tx.status}`}>{tx.status}</span></td>
+                      <td>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleValidateAndRelay(tx)}
+                          disabled={busyId === tx.id}
+                        >
+                          {busyId === tx.id ? "Minting..." : "Validate Bridge"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ═══════════ Processed TXs ═══════════════════
+  if (subPage === "processed") {
+    const processedTxs = [...validated, ...completed];
+    return (
+      <div>
+        {topBar("Processed Transactions", "Validated and completed bridge transactions.")}
+        <div className="card">
+          {processedTxs.length === 0 ? (
+            <div className="empty-state"><p>No processed transactions yet.</p></div>
+          ) : (
+            <table className="validator-table">
+              <thead><tr><th>Tx ID</th><th>Type</th><th>Route</th><th>User</th><th>Payload</th><th>Status</th></tr></thead>
+              <tbody>
+                {processedTxs.map((tx) => {
+                  const isNFT = tx.type.includes("NFT");
+                  return (
+                    <tr key={tx.id}>
+                      <td><span className="cell-hash">{tx.txHash ? shortenAddress(tx.txHash) : "--"}</span></td>
+                      <td><span className={isNFT ? "badge badge-nft" : "badge badge-token"}>{isNFT ? "Medical NFT" : "Token"}</span></td>
+                      <td><span className="route-text">{tx.sourceChain} &rarr; {tx.destChain}</span></td>
+                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>{shortenAddress(tx.sender)}</td>
+                      <td>{isNFT ? `#${tx.tokenId || "?"}` : `${tx.amountFormatted || "?"} BRT`}</td>
+                      <td><span className={`badge badge-${tx.status}`}>{tx.status}</span></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ═══════════ Node Status ═════════════════════
+  if (subPage === "status") {
+    return (
+      <div>
+        {topBar("Node Status", "Validator node connection and performance details.")}
+        <div className="stats-row stats-row-3">
+          <div className="stat-card">
+            <div className="stat-card-header"><span>Node Status</span></div>
+            <div className="stat-value" style={{ color: "#059669" }}>Online</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-header"><span>Connected Chain</span></div>
+            <div className="stat-value" style={{ fontSize: 20 }}>{chainName}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-header"><span>Validator Address</span></div>
+            <div className="stat-value" style={{ fontSize: 16, fontFamily: "monospace" }}>{shortenAddress(account)}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══════════ Event Listener ══════════════════
+  if (subPage === "events") {
+    return (
+      <div>
+        {topBar("Live Event Listener", "Real-time blockchain events from BridgeContract.")}
+        <div className="card">
+          <div className="card-header">
+            <h2>Bridge Events</h2>
+            <span className="badge badge-active" style={{ padding: "6px 16px", fontSize: 13 }}>Listening to Events</span>
+          </div>
+          {allTx.length === 0 ? (
+            <div className="empty-state"><p>No events captured yet. Events appear when bridge transactions occur.</p></div>
+          ) : (
+            <table className="data-table">
+              <thead><tr><th>Event Type</th><th>Details</th><th>Network</th><th>Status</th><th>Action</th></tr></thead>
+              <tbody>
+                {allTx.map((tx) => {
+                  const isNFT = tx.type.includes("NFT");
+                  return (
+                    <tr key={tx.id}>
+                      <td>
+                        <span className="cell-main">{tx.type.includes("Lock") ? (isNFT ? "NFTLocked" : "TokenLocked") : tx.type.includes("Mint") ? (isNFT ? "NFTMinted" : "TokenMinted") : tx.type.includes("Burn") ? (isNFT ? "NFTBurned" : "TokenBurned") : "Event"}</span>
+                        <span className="cell-sub">{new Date(tx.timestamp).toLocaleTimeString()}</span>
+                      </td>
+                      <td>
+                        <span className="cell-main">{isNFT ? `Medical NFT #${tx.tokenId || "?"}` : `${tx.amountFormatted || "?"} BRT Tokens`}</span>
+                        <span className="cell-sub" style={{ fontFamily: "monospace" }}>{tx.txHash ? shortenAddress(tx.txHash) : ""}</span>
+                      </td>
+                      <td>
+                        <span className="cell-main">{tx.sourceChain}</span>
+                        <span className="cell-sub">Source</span>
+                      </td>
+                      <td><span className={`badge badge-${tx.status}`}>{tx.status}</span></td>
+                      <td><a href="#" style={{ color: "#0d9488", fontSize: 16 }} title="View details">&#8599;</a></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
