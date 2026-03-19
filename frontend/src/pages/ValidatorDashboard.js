@@ -91,16 +91,26 @@ export default function ValidatorDashboard({ subPage }) {
       const destBridge = new ethers.Contract(destAddr, getBridgeAbi(), destSigner);
 
       let tx;
-      if (isNFT && isFromSepolia) {
-        tx = await destBridge.mintMirrorNFT(transfer.sender, transfer.tokenId, transfer.nonce, transfer.sourceChainId,
-          transfer.recordType || "", transfer.encryptedCID || "", transfer.hospital || ethers.constants.AddressZero,
-          transfer.originalChainId || transfer.sourceChainId, signature, gasOverrides);
-      } else if (isNFT && !isFromSepolia) {
-        tx = await destBridge.unlockNFT(transfer.sender, transfer.tokenId, transfer.nonce, transfer.sourceChainId, signature, gasOverrides);
-      } else if (!isNFT && isFromSepolia) {
-        tx = await destBridge.mintTokens(transfer.sender, transfer.amount, transfer.nonce, transfer.sourceChainId, signature, gasOverrides);
+      if (isNFT) {
+        const isMintMirror = transfer.type.includes("Lock");
+        if (isMintMirror) {
+          // NFT Lock -> Mint: mint mirror on destination chain
+          tx = await destBridge.mintMirrorNFT(transfer.sender, transfer.tokenId, transfer.nonce, transfer.sourceChainId,
+            transfer.recordType || "", transfer.encryptedCID || "", transfer.hospital || ethers.constants.AddressZero,
+            transfer.originalChainId || transfer.sourceChainId, signature, gasOverrides);
+        } else {
+          // NFT Burn -> Unlock: unlock original on destination chain
+          tx = await destBridge.unlockNFT(transfer.sender, transfer.tokenId, transfer.nonce, transfer.sourceChainId, signature, gasOverrides);
+        }
       } else {
-        tx = await destBridge.unlockTokens(transfer.sender, transfer.amount, transfer.nonce, transfer.sourceChainId, signature, gasOverrides);
+        const isMintTokens = transfer.type.includes("Lock");
+        if (isMintTokens) {
+          // Token Lock -> Mint: mint tokens on destination chain
+          tx = await destBridge.mintTokens(transfer.sender, transfer.amount, transfer.nonce, transfer.sourceChainId, signature, gasOverrides);
+        } else {
+          // Token Burn -> Unlock: unlock tokens on destination chain
+          tx = await destBridge.unlockTokens(transfer.sender, transfer.amount, transfer.nonce, transfer.sourceChainId, signature, gasOverrides);
+        }
       }
 
       await tx.wait();

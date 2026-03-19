@@ -72,7 +72,10 @@ contract MedicalRecordNFT is ERC721, Ownable {
     event BridgeContractUpdated(address indexed bridge);
 
     // ── Constructor ─────────────────────────────────────────
-    constructor() ERC721("Medical Record NFT", "MRNFT") Ownable(msg.sender) {}
+    /// @param startTokenId Starting token ID (use different values per chain to avoid collision)
+    constructor(uint256 startTokenId) ERC721("Medical Record NFT", "MRNFT") Ownable(msg.sender) {
+        nextTokenId = startTokenId;
+    }
 
     // ── Modifiers ───────────────────────────────────────────
     modifier onlyApprovedHospital() {
@@ -116,6 +119,10 @@ contract MedicalRecordNFT is ERC721, Ownable {
         string calldata recordType,
         string calldata encryptedCID
     ) external onlyApprovedHospital returns (uint256) {
+        // Skip token IDs already occupied by mirror NFTs from bridging
+        while (_ownerOf(nextTokenId) != address(0)) {
+            nextTokenId++;
+        }
         uint256 tokenId = nextTokenId++;
 
         _records[tokenId] = RecordMetadata({
@@ -185,6 +192,11 @@ contract MedicalRecordNFT is ERC721, Ownable {
         _safeMint(patient, tokenId);
         isMirror[tokenId] = true;
         _patientTokens[patient].push(tokenId);
+
+        // Keep nextTokenId ahead of any mirror IDs to avoid collision
+        if (tokenId >= nextTokenId) {
+            nextTokenId = tokenId + 1;
+        }
 
         emit MirrorMinted(tokenId, patient, encryptedCID);
     }

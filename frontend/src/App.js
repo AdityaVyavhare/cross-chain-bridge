@@ -244,7 +244,8 @@ function getNavItems(role, subPage) {
   if (role === "hospital") {
     return [
       { key: "dashboard", label: "Upload & Mint", icon: <IconFile /> },
-      { key: "history", label: "Mint History", icon: <IconActivity /> },
+      { key: "history", label: "Minted by You", icon: <IconActivity /> },
+      { key: "granted", label: "Granted Access", icon: <IconKey /> },
       { key: "patients", label: "Manage Patients", icon: <IconUser /> },
     ];
   }

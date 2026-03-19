@@ -24,12 +24,14 @@ const NETWORKS = {
     rpc: process.env.SEPOLIA_RPC || "https://rpc.sepolia.org",
     chainId: 11155111,
     nativeToken: "ETH",
+    nftStartTokenId: 1,        // Sepolia: token IDs 1–9999
   },
   amoy: {
     name: "amoy",
     rpc: process.env.AMOY_RPC || "https://rpc-amoy.polygon.technology",
     chainId: 80002,
     nativeToken: "POL",
+    nftStartTokenId: 10000,    // Amoy: token IDs 10000+
   },
 };
 
@@ -96,7 +98,7 @@ async function deployContract(wallet, contractName, args = [], gasOverrides = {}
 
 // Deploy all 5 contracts + wire permissions on one network
 async function deployToNetwork(networkConfig) {
-  const { name, rpc, chainId, nativeToken } = networkConfig;
+  const { name, rpc, chainId, nativeToken, nftStartTokenId } = networkConfig;
   console.log(`\n${"=".repeat(60)}`);
   console.log(`  Deploying to ${name.toUpperCase()} (chainId: ${chainId})`);
   console.log(`${"=".repeat(60)}\n`);
@@ -122,8 +124,8 @@ async function deployToNetwork(networkConfig) {
 
   // 2. MedicalRecordNFT
   console.log("  [2/5] Deploying MedicalRecordNFT...");
-  const nft = await deployContract(wallet, "MedicalRecordNFT", [], gasOverrides);
-  console.log(`         -> ${nft.address}`);
+  const nft = await deployContract(wallet, "MedicalRecordNFT", [nftStartTokenId], gasOverrides);
+  console.log(`         -> ${nft.address} (startTokenId: ${nftStartTokenId})`);
 
   // 3. ValidatorManager
   console.log("  [3/5] Deploying ValidatorManager...");

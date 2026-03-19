@@ -15,6 +15,7 @@ import {
 import { addTransaction, selectAllTransactions } from "../slices/bridgeSlice";
 import config from "../config";
 import { ipfsToHttp } from "../utils/pinata";
+import RecordPreviewModal from "../components/RecordPreviewModal";
 
 export default function PatientDashboard({ subPage }) {
   const { account, signer, provider, chainId, networkConfig, isSupported } = useBridge();
@@ -41,6 +42,9 @@ export default function PatientDashboard({ subPage }) {
   const [bridgeFee, setBridgeFee] = useState(null);
   const [approving, setApproving] = useState(false);
   const [bridging, setBridging] = useState(false);
+
+  // Preview modal
+  const [previewRecord, setPreviewRecord] = useState(null);
 
   const setMsg = (msg, type = "info") => { setStatus(msg); setStatusType(type); };
   const chainName = isSepolia(chainId) ? "Ethereum Sepolia" : "Polygon Amoy";
@@ -330,7 +334,7 @@ export default function PatientDashboard({ subPage }) {
             <div className="empty-state"><p>No medical records found on this chain.</p></div>
           ) : (
             <table className="data-table">
-              <thead><tr><th>Record</th><th>Type</th><th>Hospital</th><th>Date</th><th>Chain</th><th>Status</th></tr></thead>
+              <thead><tr><th>Record</th><th>Type</th><th>Hospital</th><th>Date</th><th>Chain</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {records.slice(0, 5).map((rec) => (
                   <tr key={rec.tokenId}>
@@ -344,6 +348,11 @@ export default function PatientDashboard({ subPage }) {
                         : rec.isMirror ? <span className="badge badge-validated">Mirror</span>
                         : <span className="badge badge-active">Active</span>}
                     </td>
+                    <td>
+                      {rec.encryptedCID && (
+                        <button className="btn btn-sm btn-outline" onClick={() => setPreviewRecord(rec)}>Preview</button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -351,6 +360,7 @@ export default function PatientDashboard({ subPage }) {
           )}
         </div>
         {status && <div className={`alert alert-${statusType}`}>{status}</div>}
+        {previewRecord && <RecordPreviewModal record={previewRecord} onClose={() => setPreviewRecord(null)} />}
       </div>
     );
   }
@@ -383,7 +393,7 @@ export default function PatientDashboard({ subPage }) {
                   <td>
                     <div className="action-btns">
                       {rec.encryptedCID && (
-                        <button onClick={() => window.open(ipfsToHttp(rec.encryptedCID), "_blank")}>View Record</button>
+                        <button onClick={() => setPreviewRecord(rec)}>Preview</button>
                       )}
                       {!rec.locked && !rec.isMirror && (
                         <button className="btn-teal" onClick={() => handleBridgeNFT(rec.tokenId)}>Bridge Record</button>
@@ -399,6 +409,7 @@ export default function PatientDashboard({ subPage }) {
           </table>
         )}
         {status && <div className={`alert alert-${statusType}`} style={{ marginTop: 16 }}>{status}</div>}
+        {previewRecord && <RecordPreviewModal record={previewRecord} onClose={() => setPreviewRecord(null)} />}
       </div>
     );
   }
